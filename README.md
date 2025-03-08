@@ -1,2 +1,2 @@
 # COL216_Assignment2
-Pipelining in CPP
+Creating a machine code to pipeline diagram converter in CPP

@@ -1,300 +1,319 @@
 #include <iostream>
 #include <fstream>
-#include <sstream>
-#include <iomanip>
 #include <vector>
 #include <string>
-#include <unordered_map>
+#include <map>
 #include <algorithm>
+#include <iomanip>
 #include <bitset>
+#include <sstream>
+#include <cctype>
 
 using namespace std;
 
-// Global variables for register busy times, opcode list, cycle management, and pipeline table.
-unordered_map<string, int> register_busy;
+map<string, int> register_busy;
+vector<vector<string>> output_table;
 vector<string> opcodes;
-int number_of_opcodes = 0;
 int current_cycle = 1;
 int cycle_of_prev_IF = 0;
-vector<vector<string>> output_table;
 
-// A structure to hold decoded instruction information.
 struct InstructionInfo {
-    string type = "UNKNOWN";
+    string type;
     vector<string> input_registers;
-    string output_register = "";
+    string output_register;
 };
 
-// Helper: convert hex string to 32-bit binary string.
-string hexToBin32(const string &hexStr) {
-    unsigned int num = stoul(hexStr, nullptr, 16);
-    bitset<32> bs(num);
-    return bs.to_string(); // already padded to 32 bits
+void initialize_registers() {
+    for (int i = 0; i < 32; ++i) {
+        register_busy["x" + to_string(i)] = 0;
+    }
 }
 
-// Pipeline stage functions.
+string clean_string(const string& str) {
+    string result;
+    for (char c : str) {
+        if (isprint(c)) {
+            result += c;
+        }
+    }
+    return result;
+}
+
 void IF(int i) {
     cycle_of_prev_IF = current_cycle;
     output_table[i].push_back("IF");
-    current_cycle++;
+    current_cycle += 1;
 }
 
-InstructionInfo ID(const string &opcode_hex, int i) {
+InstructionInfo ID(const string& opcode_hex, int i) {
     InstructionInfo result;
-    string opcode_bin = hexToBin32(opcode_hex);
-    // Extract the last 7 bits (opcode field)
-    string opcode_field = opcode_bin.substr(25, 7);
-
+    result.type = "UNKNOWN";
+    
+    // Convert hex to binary
+    unsigned int opcode_int;
+    stringstream ss;
+    ss << hex << opcode_hex;
+    ss >> opcode_int;
+    bitset<32> opcode_bin(opcode_int);
+    string opcode_bin_str = opcode_bin.to_string();
+    
+    string opcode_field = opcode_bin_str.substr(25, 7);
+    
     if (opcode_field == "0110011") { // R-type
-        int rd  = stoi(opcode_bin.substr(20, 5), nullptr, 2);
-        int rs1 = stoi(opcode_bin.substr(12, 5), nullptr, 2);
-        int rs2 = stoi(opcode_bin.substr(7, 5), nullptr, 2);
+        int rd = stoi(opcode_bin_str.substr(20, 5), nullptr, 2);
+        int rs1 = stoi(opcode_bin_str.substr(12, 5), nullptr, 2);
+        int rs2 = stoi(opcode_bin_str.substr(7, 5), nullptr, 2);
         result.type = "R";
         result.output_register = "x" + to_string(rd);
-        result.input_registers.push_back("x" + to_string(rs1));
-        result.input_registers.push_back("x" + to_string(rs2));
-    }
-    else if (opcode_field == "0010011") { // I-type (ALU immediate)
-        int rd  = stoi(opcode_bin.substr(20, 5), nullptr, 2);
-        int rs1 = stoi(opcode_bin.substr(12, 5), nullptr, 2);
+        result.input_registers = {"x" + to_string(rs1), "x" + to_string(rs2)};
+    } 
+    else if (opcode_field == "0010011") { // I-type
+        int rd = stoi(opcode_bin_str.substr(20, 5), nullptr, 2);
+        int rs1 = stoi(opcode_bin_str.substr(12, 5), nullptr, 2);
         result.type = "I";
         result.output_register = "x" + to_string(rd);
-        result.input_registers.push_back("x" + to_string(rs1));
-    }
-    else if (opcode_field == "0000011") { // Load
-        int rd  = stoi(opcode_bin.substr(20, 5), nullptr, 2);
-        int rs1 = stoi(opcode_bin.substr(12, 5), nullptr, 2);
+        result.input_registers = {"x" + to_string(rs1)};
+    } 
+    else if (opcode_field == "0000011") { // LOAD
+        int rd = stoi(opcode_bin_str.substr(20, 5), nullptr, 2);
+        int rs1 = stoi(opcode_bin_str.substr(12, 5), nullptr, 2);
         result.type = "LOAD";
         result.output_register = "x" + to_string(rd);
-        result.input_registers.push_back("x" + to_string(rs1));
-    }
-    else if (opcode_field == "0100011") { // Store
-        int rs1 = stoi(opcode_bin.substr(12, 5), nullptr, 2);
-        int rs2 = stoi(opcode_bin.substr(7, 5), nullptr, 2);
+        result.input_registers = {"x" + to_string(rs1)};
+    } 
+    else if (opcode_field == "0100011") { // STORE
+        int rs1 = stoi(opcode_bin_str.substr(12, 5), nullptr, 2);
+        int rs2 = stoi(opcode_bin_str.substr(7, 5), nullptr, 2);
         result.type = "STORE";
-        result.input_registers.push_back("x" + to_string(rs1));
-        result.input_registers.push_back("x" + to_string(rs2));
-    }
-    else if (opcode_field == "1100011") { // Branch
-        int rs1 = stoi(opcode_bin.substr(12, 5), nullptr, 2);
-        int rs2 = stoi(opcode_bin.substr(7, 5), nullptr, 2);
+        result.input_registers = {"x" + to_string(rs1), "x" + to_string(rs2)};
+    } 
+    else if (opcode_field == "1100011") { // BRANCH
+        int rs1 = stoi(opcode_bin_str.substr(12, 5), nullptr, 2);
+        int rs2 = stoi(opcode_bin_str.substr(7, 5), nullptr, 2);
         result.type = "BRANCH";
-        result.input_registers.push_back("x" + to_string(rs1));
-        result.input_registers.push_back("x" + to_string(rs2));
+        result.input_registers = {"x" + to_string(rs1), "x" + to_string(rs2)};
+    } 
+    else if (opcode_field == "0110111") { // LUI
+        int rd = stoi(opcode_bin_str.substr(20, 5), nullptr, 2);
+        result.type = "LUI";
+        result.output_register = "x" + to_string(rd);
+    } 
+    else if (opcode_field == "0010111") { // AUIPC
+        int rd = stoi(opcode_bin_str.substr(20, 5), nullptr, 2);
+        result.type = "AUIPC";
+        result.output_register = "x" + to_string(rd);
     }
-
+    
     output_table[i].push_back("ID");
-    current_cycle++;
+    current_cycle += 1;
     return result;
 }
 
 void EXE(int i) {
     output_table[i].push_back("EXE");
-    current_cycle++;
+    current_cycle += 1;
 }
 
 void MEM(int i) {
     output_table[i].push_back("MEM");
-    current_cycle++;
+    current_cycle += 1;
 }
 
-void WB(const string &inst_op_reg, int i) {
+void WB(const string& inst_op_reg, int i) {
     output_table[i].push_back("WB");
-    // Mark the register busy until the current cycle
-    register_busy[inst_op_reg] = current_cycle;
+    if (!inst_op_reg.empty()) {
+        register_busy[inst_op_reg] = current_cycle;
+    }
 }
 
-// The pipeline function schedules the stages for each instruction.
 void pipeline() {
-    for (int i = 0; i < number_of_opcodes; i++) {
-        // Align this instruction with previous IF cycle count
-        for (int j = 0; j < cycle_of_prev_IF; j++) {
+    for (int i = 0; i < opcodes.size(); ++i) {
+        // Fill with empty strings up to cycle_of_prev_IF
+        while (output_table[i].size() < cycle_of_prev_IF) {
             output_table[i].push_back(" ");
         }
         current_cycle = cycle_of_prev_IF + 1;
 
-        // Wait until previous instruction's cycle cell is not "-" (for i>0)
-        while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-               output_table[i - 1][current_cycle - 1] == "-") {
+        // Handle IF stage and stalls
+        while (i > 0 && current_cycle <= output_table[i-1].size() && output_table[i-1][current_cycle-1] == "-") {
             output_table[i].push_back(" ");
-            current_cycle++;
+            current_cycle += 1;
         }
         IF(i);
 
-        while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-               output_table[i - 1][current_cycle - 1] == "-") {
+        // Decode the instruction
+        while (i > 0 && current_cycle <= output_table[i-1].size() && output_table[i-1][current_cycle-1] == "-") {
             output_table[i].push_back("-");
-            current_cycle++;
+            current_cycle += 1;
         }
         InstructionInfo inst = ID(opcodes[i], i);
 
-        if (inst.type == "R") {
-            // Check both input registers are free.
-            while (max(register_busy[inst.input_registers[0]],
-                       register_busy[inst.input_registers[1]]) >= current_cycle) {
-                output_table[i].push_back("-");
-                current_cycle++;
-            }
-            while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-                   output_table[i - 1][current_cycle - 1] == "-") {
-                output_table[i].push_back("-");
-                current_cycle++;
-            }
-            EXE(i);
-            while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-                   output_table[i - 1][current_cycle - 1] == "-") {
-                output_table[i].push_back("-");
-                current_cycle++;
-            }
-            MEM(i);
-        }
-        else if (inst.type == "I") {
-            while (register_busy[inst.input_registers[0]] >= current_cycle) {
-                output_table[i].push_back("-");
-                current_cycle++;
-            }
-            while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-                   output_table[i - 1][current_cycle - 1] == "-") {
-                output_table[i].push_back("-");
-                current_cycle++;
+        // Handle stalls for hazards
+        if (inst.type == "R" || inst.type == "I") {
+            bool stall = false;
+            do {
+                stall = false;
+                for (const auto& reg : inst.input_registers) {
+                    if (register_busy[reg] >= current_cycle) {
+                        stall = true;
+                        break;
+                    }
+                }
+                if (stall) {
+                    output_table[i].push_back("-");
+                    current_cycle += 1;
+                }
+            } while (stall);
+            
+            if (!inst.output_register.empty()) {
+                register_busy[inst.output_register] = current_cycle;
             }
             EXE(i);
-            while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-                   output_table[i - 1][current_cycle - 1] == "-") {
-                output_table[i].push_back("-");
-                current_cycle++;
-            }
             MEM(i);
         }
         else if (inst.type == "LOAD") {
             while (register_busy[inst.input_registers[0]] >= current_cycle) {
                 output_table[i].push_back("-");
-                current_cycle++;
-            }
-            while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-                   output_table[i - 1][current_cycle - 1] == "-") {
-                output_table[i].push_back("-");
-                current_cycle++;
+                current_cycle += 1;
             }
             EXE(i);
-            while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-                   output_table[i - 1][current_cycle - 1] == "-") {
-                output_table[i].push_back("-");
-                current_cycle++;
+            if (!inst.output_register.empty()) {
+                register_busy[inst.output_register] = current_cycle;
             }
             MEM(i);
         }
         else if (inst.type == "STORE") {
             while (register_busy[inst.input_registers[1]] >= current_cycle) {
                 output_table[i].push_back("-");
-                current_cycle++;
-            }
-            while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-                   output_table[i - 1][current_cycle - 1] == "-") {
-                output_table[i].push_back("-");
-                current_cycle++;
+                current_cycle += 1;
             }
             EXE(i);
+            
             while (register_busy[inst.input_registers[0]] >= current_cycle) {
                 output_table[i].push_back("-");
-                current_cycle++;
+                current_cycle += 1;
             }
-            while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-                   output_table[i - 1][current_cycle - 1] == "-") {
-                output_table[i].push_back("-");
-                current_cycle++;
+            if (!inst.input_registers[1].empty()) {
+                register_busy[inst.input_registers[1]] = current_cycle;
             }
             MEM(i);
         }
-
-        // Add WB stage for all instructions (if applicable)
-        while (i > 0 && current_cycle <= output_table[i - 1].size() &&
-               output_table[i - 1][current_cycle - 1] == "-") {
-            output_table[i].push_back("-");
-            current_cycle++;
+        else if (inst.type == "BRANCH") {
+            bool stall = false;
+            do {
+                stall = false;
+                for (const auto& reg : inst.input_registers) {
+                    if (register_busy[reg] >= current_cycle) {
+                        stall = true;
+                        break;
+                    }
+                }
+                if (stall) {
+                    output_table[i].push_back("-");
+                    current_cycle += 1;
+                }
+            } while (stall);
+            
+            EXE(i);
+            MEM(i);
+        }
+        else if (inst.type == "LUI" || inst.type == "AUIPC") {
+            if (!inst.output_register.empty()) {
+                register_busy[inst.output_register] = current_cycle;
+            }
+            EXE(i);
+            MEM(i);
+        }
+        else {
+            EXE(i);
+            MEM(i);
         }
         WB(inst.output_register, i);
     }
 }
 
-// Function to print the pipeline table.
 void print_table() {
-    // Determine the maximum number of cycles (columns) across all instructions.
+    // Find maximum columns needed
     size_t max_cols = 0;
-    for (const auto &row : output_table) {
-        if (row.size() > max_cols)
+    for (const auto& row : output_table) {
+        if (row.size() > max_cols) {
             max_cols = row.size();
-    }
-    
-    // Pad rows with empty strings so that all have the same length.
-    for (auto &row : output_table) {
-        while (row.size() < max_cols)
-            row.push_back("");
-    }
-    
-    // Create header with cycle numbers starting at 1.
-    vector<string> header;
-    header.push_back("Instruction");
-    for (size_t c = 0; c < max_cols; c++)
-        header.push_back(to_string(c + 1));
-    
-    // Determine width for the instruction column.
-    size_t instr_col_width = 11; // at least "Instruction"
-    for (const auto &instr : opcodes)
-        instr_col_width = max(instr_col_width, instr.size());
-    
-    // Print header.
-    cout << left << setw(instr_col_width) << "Instruction" << " | ";
-    for (size_t c = 1; c < header.size(); c++) {
-        cout << setw(3) << header[c];
-        if (c < header.size() - 1)
-            cout << " | ";
-    }
-    cout << "\n" << string(instr_col_width + 3 + (max_cols * 6 - 3), '-') << "\n";
-    
-    // Print each instruction row.
-    for (size_t i = 0; i < output_table.size(); i++) {
-        cout << left << setw(instr_col_width) << opcodes[i] << " | ";
-        for (size_t j = 0; j < output_table[i].size(); j++) {
-            cout << setw(3) << output_table[i][j];
-            if (j < output_table[i].size() - 1)
-                cout << " | ";
         }
-        cout << "\n";
+    }
+    
+    // Calculate column widths
+    size_t instr_col_width = 10; // "Instruction" length
+    for (const auto& instr : opcodes) {
+        if (instr.length() > instr_col_width) {
+            instr_col_width = instr.length();
+        }
+    }
+    
+    // Print header
+    cout << left << setw(instr_col_width) << "Instruction" << " |  ";
+    for (size_t c = 0; c < max_cols; ++c) {
+        cout << left << setw(3) << to_string(c+1);
+        if (c != max_cols - 1) {
+            cout << " | ";
+        }
+    }
+    cout << endl;
+    
+    // Print separator line
+    cout << string(instr_col_width, '-') << "-|-";
+    for (size_t c = 0; c < max_cols; ++c) {
+        cout << string(3, '-');
+        if (c != max_cols - 1) {
+            cout << "-|-";
+        }
+    }
+    cout << endl;
+    
+    // Print each instruction row
+    for (size_t i = 0; i < opcodes.size(); ++i) {
+        cout << left << setw(instr_col_width) << opcodes[i] << " | ";
+        for (size_t j = 0; j < max_cols; ++j) {
+            if (j < output_table[i].size()) {
+                cout << left << setw(3) << output_table[i][j];
+            } else {
+                cout << left << setw(3) << " ";
+            }
+            if (j != max_cols - 1) {
+                cout << " | ";
+            }
+        }
+        cout << endl;
     }
 }
 
 int main() {
-    // Initialize register_busy with registers x0 to x31, all set to 0.
-    for (int i = 0; i < 32; i++) {
-        string reg = "x" + to_string(i);
-        register_busy[reg] = 0;
-    }
+    initialize_registers();
     
-    // Read opcodes from "input.txt"
-    ifstream infile("input.txt");
-    if (!infile) {
-        cerr << "Error: input.txt not found." << endl;
+    ifstream file("input.txt");
+    if (!file.is_open()) {
+        cerr << "Error opening input.txt" << endl;
         return 1;
     }
+    
     string line;
-    while (getline(infile, line)) {
+    while (getline(file, line)) {
+        line = clean_string(line);
+        
+        // Remove leading/trailing whitespace
+        size_t start = line.find_first_not_of(" \t");
+        if (start != string::npos) {
+            size_t end = line.find_last_not_of(" \t");
+            line = line.substr(start, end - start + 1);
+        }
+        
         if (!line.empty()) {
-            // Trim whitespace from both ends.
-            istringstream iss(line);
-            string opcode;
-            iss >> opcode;
-            if (!opcode.empty()) {
-                opcodes.push_back(opcode);
-            }
+            opcodes.push_back(line);
         }
     }
-    infile.close();
+    file.close();
     
-    number_of_opcodes = opcodes.size();
-    output_table.resize(number_of_opcodes);
+    output_table.resize(opcodes.size());
     
-    // Run the pipeline simulation and print the table.
     pipeline();
     print_table();
     

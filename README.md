@@ -58,8 +58,3 @@ SUB; ; IF; ID; EXE; MEM; WB;
 ## Notes
 - The current version **does not support branches or jumps**.
 - Future improvements may include control hazard handling.
-
-## Contributors
-- Ravi Kumawat
-- Nishant
-

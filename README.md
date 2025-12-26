@@ -1,9 +1,5 @@
 # RISC-V Pipeline Simulator
 
-## Authors
-- Ravi Kumawat
-- Nishant
-
 ## Overview
 This project implements a **RISC-V processor pipeline simulator** in C++, with two versions:
 1. `noforwarding.cpp` - Implements the pipeline **without forwarding**, introducing stalls when required.
